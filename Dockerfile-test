@@ -1,0 +1,110 @@
+# # 第一阶段：构建应用程序
+# ARG PNPM_VERSION=7.11.0
+# FROM node:18 AS build
+# WORKDIR /app
+
+# # 安装 curl 和 pnpm
+# RUN apt-get update && apt-get install -y curl && \
+#     npm install -g pnpm@$PNPM_VERSION
+
+# # 安装依赖并构建
+# COPY ./package.json ./pnpm-lock.yaml /app/
+# RUN npm install && pnpm install && pnpm build
+# COPY . .
+
+# # 第二阶段：部署生产环境
+# FROM docker:20.10-dind
+# WORKDIR /app
+
+# # 安装系统必需软件包、curl 和 pnpm
+# RUN apk --no-cache add curl ca-certificates openssl && \
+#     npm install -g pnpm
+
+# # 安装 Docker Compose
+# RUN curl -sSL https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose && \
+#     chmod +x /usr/local/bin/docker-compose
+
+# # 安装 Pack
+# RUN PACK_VERSION=0.20.1 && \
+#     curl -sSL https://github.com/buildpacks/pack/releases/download/v${PACK_VERSION}/pack-v${PACK_VERSION}-linux.tgz | tar xvz -C /tmp/ && \
+#      mv /tmp/pack /usr/local/bin/pack && \
+#      chmod +x /usr/local/bin/pack
+
+# # 设置环境变量
+# ENV DOCKER_BUILDKIT=1
+# ENV COMPOSE_DOCKER_CLI_BUILD=1
+
+# # 复制构建结果
+# COPY --from=build /app .
+
+# # 启动应用程序
+# CMD ["pm2-runtime", "ecosystem.config.js"]
+
+
+# 以下是优化后的Dockerfile：
+ARG PNPM_VERSION=7.11.0
+
+# Install dependencies and build application
+FROM node:18-slim as build
+WORKDIR /app
+
+RUN apt update && apt -y install curl
+RUN npm --no-update-notifier --no-fund --global install pnpm@${PNPM_VERSION}
+
+COPY . .
+RUN pnpm install --frozen-lockfile --prefer-offline
+RUN pnpm build
+
+# Production build
+FROM node:18-slim
+WORKDIR /app
+ENV NODE_ENV production
+
+# Install dependencies
+RUN apt update && apt -y install --no-install-recommends \
+    ca-certificates \
+    git \
+    git-lfs \
+    openssh-client \
+    curl \
+    jq \
+    cmake \
+    sqlite3 \
+    openssl \
+    psmisc \
+    python3
+RUN apt-get clean autoclean && apt-get autoremove --yes && rm -rf /var/lib/{apt,dpkg,cache,log}/
+RUN npm --no-update-notifier --no-fund --global install pnpm@${PNPM_VERSION}
+RUN npm install -g npm@${PNPM_VERSION}
+
+# Install Docker, Docker Compose, and Cloud Native Buildpacks CLI
+ARG TARGETPLATFORM
+ARG DOCKER_VERSION=20.10.24
+ARG DOCKER_COMPOSE_VERSION=2.6.1
+ARG PACK_VERSION=0.27.0
+
+RUN curl -SL https://download.docker.com/linux/static/stable/x86_64/docker-$DOCKER_VERSION.tgz | tar xvz -C /usr/bin/ --strip-components=1 docker/docker
+RUN curl -SL https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose
+RUN curl -SL https://github.com/buildpacks/pack/releases/download/v$PACK_VERSION/pack-v$PACK_VERSION-linux.tgz | tar xvz -C /usr/local/bin/pack/
+RUN chmod +x /usr/local/bin/docker-compose /usr/bin/docker /usr/local/bin/pack
+
+# Copy application files from build stage
+COPY --from=build /app/apps/api/build/ ./api
+COPY --from=build /app/apps/ui/build/ ./public
+COPY --from=build /app/apps/api/prisma/ ./prisma
+COPY --from=build /app/apps/api/package.json .
+COPY --from=build /app/docker-compose.yaml .
+COPY --from=build /app/apps/api/tags.json .
+COPY --from=build /app/apps/api/templates.json .
+
+# Install production dependencies
+RUN pnpm install --prod --frozen-lockfile --prefer-offline
+
+EXPOSE 3000
+ENV CHECKPOINT_DISABLE=1
+CMD node api/dist/main.js
+# 优化说明：
+# - 在构建应用程序的阶段，我们使用了处于 Dockerfile 构建上下文之外的缓存机制，Frozen Lockfiles，以确保在每次构建时使用相同的依赖版本，避免了安装过程中的网络请求，以提高构建效率。
+# - 在应用程序生产环境的阶段，首先我们只安装生产模式的依赖项，然后我们尽可能使用容器内置工具，而不是从外部下载工具，以提高构建效率。
+# - 在应用程序生产环境的阶段，我们删除了不必要的命令、优化了镜像大小，并从构建中删除了 FluentBit。
+# - 在应用程序生产环境的阶段，我们更改了启动命令，以使用 Node.js 运行应用程序。

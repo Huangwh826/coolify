@@ -17,7 +17,7 @@ ENV NODE_ENV production
 ARG TARGETPLATFORM
 
 # https://download.docker.com/linux/static/stable/
-ARG DOCKER_VERSION=20.10.18
+ARG DOCKER_VERSION=20.10.24
 # https://github.com/docker/compose/releases
 # Reverted to 2.6.1 because of this https://github.com/docker/compose/issues/9704. 2.9.0 still has a bug.
 ARG DOCKER_COMPOSE_VERSION=2.6.1
@@ -29,13 +29,22 @@ RUN apt-get clean autoclean && apt-get autoremove --yes && rm -rf /var/lib/{apt,
 RUN npm --no-update-notifier --no-fund --global install pnpm@${PNPM_VERSION}
 RUN npm install -g npm@${PNPM_VERSION}
 
-RUN mkdir -p ~/.docker/cli-plugins/
+# RUN mkdir -p ~/.docker/cli-plugins/
+RUN mkdir -p /usr/local/bin/pack/
 
-RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/docker-$DOCKER_VERSION -o /usr/bin/docker
-RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/docker-compose-linux-$DOCKER_COMPOSE_VERSION -o ~/.docker/cli-plugins/docker-compose
-RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/pack-$PACK_VERSION -o /usr/local/bin/pack 
+# RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/docker-$DOCKER_VERSION -o /usr/bin/docker
+# RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/docker-compose-linux-$DOCKER_COMPOSE_VERSION -o ~/.docker/cli-plugins/docker-compose
+# RUN curl -SL https://cdn.coollabs.io/bin/$TARGETPLATFORM/pack-$PACK_VERSION -o /usr/local/bin/pack 
+RUN curl -SL https://download.docker.com/linux/static/stable/x86_64/docker-$DOCKER_VERSION.tgz | \
+    tar xvz -C /usr/bin/ --strip-components=1 docker/docker
+RUN curl -SL https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
+RUN curl -SL https://github.com/buildpacks/pack/releases/download/v$PACK_VERSION/pack-v$PACK_VERSION-linux.tgz | \
+    tar xvz -C /usr/local/bin/pack/
 
-RUN chmod +x ~/.docker/cli-plugins/docker-compose /usr/bin/docker /usr/local/bin/pack
+
+# RUN chmod +x ~/.docker/cli-plugins/docker-compose /usr/bin/docker /usr/local/bin/pack
+RUN chmod +x /usr/local/bin/docker-compose /usr/bin/docker /usr/local/bin/pack
 
 COPY --from=build /app/apps/api/build/ .
 # COPY --from=build /app/others/fluentbit/ ./fluentbit
